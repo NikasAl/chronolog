@@ -36,6 +36,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   uuid: ^4.5.2
   tutorial_coach_mark: ^1.2.9 # Для красивых подсказок
+  isar: ^3.1.0+1
+  isar_flutter_libs: ^3.1.0+1
+  path_provider: ^2.1.2 # Для поиска папки документов
 
 dev_dependencies:
   flutter_test:
@@ -47,7 +50,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-
+  build_runner: ^2.4.8
+  isar_generator: ^3.1.0+1
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

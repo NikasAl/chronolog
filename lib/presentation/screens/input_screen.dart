@@ -16,6 +16,9 @@ class InputScreen extends StatefulWidget {
 class _InputScreenState extends State<InputScreen> {
   final _queryController = TextEditingController();
   double _importance = 5.0;
+  int _selectedSamples = 100; // По умолчанию
+  final List<int> _sampleOptions = [100, 400, 1000];
+
   EventType _selectedType = EventType.prediction;
 
   void _initiateSequence() {
@@ -25,6 +28,8 @@ class _InputScreenState extends State<InputScreen> {
       query: _queryController.text,
       importance: _importance.toInt(),
       type: _selectedType,
+      totalSamples: _selectedSamples,
+      timestamp: DateTime.now(),
     );
 
     print("Event Created: ${event.query}, Importance: ${event.importance}");
@@ -139,9 +144,64 @@ class _InputScreenState extends State<InputScreen> {
               }).toList(),
             ),
 
+            const SizedBox(height: 40),
+
+            // 4. Размер выборки (Samples)
+            LoreWrapper(
+              titleKey: 'lore_samples_title',
+              descKey: 'lore_samples_desc',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(AppStrings.get('input_samples_label'), style: const TextStyle(color: AppColors.accent)),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.info_outline, size: 16, color: Colors.white24),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Сегментированный переключатель
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Row(
+                children: _sampleOptions.map((samples) {
+                  bool isSelected = _selectedSamples == samples;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedSamples = samples),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppColors.accent.withOpacity(0.2) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(2),
+                          border: isSelected ? Border.all(color: AppColors.accent.withOpacity(0.5)) : null,
+                        ),
+                        child: Text(
+                          "$samples",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Monospace',
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? AppColors.accent : Colors.white24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
             const Spacer(),
 
-            // 4. Кнопка запуска
+            // 5. Кнопка запуска
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(

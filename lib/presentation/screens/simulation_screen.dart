@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Для вибрации (Haptics)
+import 'package:flutter/services.dart';
 import '../../core/theme.dart';
 import '../../core/strings.dart';
 import '../../data/models/chronos_event.dart';
-import 'dashboard_screen.dart'; // Чтобы вернуться домой после завершения
+import 'dashboard_screen.dart';
 import '../widgets/lore_dialog.dart';
 import '../widgets/sigma_chart.dart';
+import '../../data/database/isar_service.dart';
 
 class SimulationScreen extends StatefulWidget {
   final ChronosEvent event;
@@ -19,22 +20,27 @@ class SimulationScreen extends StatefulWidget {
 }
 
 class _SimulationScreenState extends State<SimulationScreen> {
-  // Константы симуляции
-  static const int _targetSamples = 100; // Размер серии
-  static const int _speedMs = 60; // Скорость анимации (чем меньше, тем быстрее)
+  // Скорость анимации
+  int get _speedMs {
+    if (widget.event.totalSamples >= 1000) return 5; 
+    if (widget.event.totalSamples >= 400) return 20;
+    return 50; 
+  }
 
   final Random _random = Random();
   Timer? _timer;
   
-  // Состояние
-  List<bool> _results = []; // true = Heads (Gold), false = Tails (Gray)
+  List<bool> _results = [];
   int _headsCount = 0;
   bool _isComplete = false;
   List<double> _sigmaHistory = [];
 
+  int get _targetSamples => widget.event.totalSamples;
+
   @override
   void initState() {
     super.initState();
+    _sigmaHistory = [];
     _startSimulation();
   }
 
@@ -44,7 +50,6 @@ class _SimulationScreenState extends State<SimulationScreen> {
     super.dispose();
   }
 
-  // Z-Score в реальном времени
   double get _currentSigma {
     if (_results.isEmpty) return 0.0;
     double expected = _results.length * 0.5;
@@ -54,7 +59,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
   }
 
   void _startSimulation() {
-    _timer = Timer.periodic(const Duration(milliseconds: _speedMs), (timer) {
+    _timer = Timer.periodic(Duration(milliseconds: _speedMs), (timer) {
       if (_results.length >= _targetSamples) {
         _finishSimulation();
       } else {
@@ -68,10 +73,8 @@ class _SimulationScreenState extends State<SimulationScreen> {
       bool isHead = _random.nextBool();
       _results.add(isHead);
       if (isHead) _headsCount++;
-      
       _sigmaHistory.add(_currentSigma);      
       
-      // Вибрация на аномалиях (если сигма скачет)
       if (_currentSigma.abs() > 2.0) {
         HapticFeedback.selectionClick(); 
       }
@@ -80,30 +83,37 @@ class _SimulationScreenState extends State<SimulationScreen> {
 
   void _finishSimulation() {
     _timer?.cancel();
+    
+    // АВТО-СОХРАНЕНИЕ
+    _autoSaveResult();
+
     setState(() {
       _isComplete = true;
     });
-    // Финальная тяжелая вибрация при завершении
     HapticFeedback.heavyImpact();
   }
 
-  void _saveAndExit() {
-    // TODO: Здесь мы будем сохранять результат в БД (Phase 3)
-    // Пока просто обновляем модель и печатаем в консоль
+  void _autoSaveResult() async {
+    // Создаем экземпляр модели с результатами
     final resultEvent = ChronosEvent(
-      id: widget.event.id,
       query: widget.event.query,
       importance: widget.event.importance,
-      type: widget.event.type,
-      timestamp: widget.event.timestamp,
       totalSamples: _targetSamples,
+      type: widget.event.type,
+      timestamp: DateTime.now(), // Фиксируем время завершения
       positiveHits: _headsCount,
       sigma: _currentSigma,
+      isFulfilled: null, // Пока неизвестно
     );
 
-    print("SAVED: Sigma=${resultEvent.sigma.toStringAsFixed(2)}");
+    // Сохраняем в базу
+    final isarService = IsarService();
+    await isarService.saveEvent(resultEvent);
+    
+    print("DB SAVED: Sigma=${resultEvent.sigma.toStringAsFixed(2)}");
+  }
 
-    // Возвращаемся на дэшборд, сбрасывая все экраны до него
+  void _exit() {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const DashboardScreen()),
       (Route<dynamic> route) => false,
@@ -116,10 +126,32 @@ class _SimulationScreenState extends State<SimulationScreen> {
     return AppColors.primary;
   }
 
+  // Получение текстов для вердикта
+  Map<String, String> _getResultStrings(double sigma) {
+    double abs = sigma.abs();
+    if (abs >= 3.0) {
+      return {
+        'title': AppStrings.get('result_crit_title'),
+        'desc': AppStrings.get('result_crit_desc'),
+      };
+    } else if (abs >= 2.0) {
+      return {
+        'title': AppStrings.get('result_warn_title'),
+        'desc': AppStrings.get('result_warn_desc'),
+      };
+    } else {
+      return {
+        'title': AppStrings.get('result_norm_title'),
+        'desc': AppStrings.get('result_norm_desc'),
+      };
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     double sigma = _currentSigma;
     Color statusColor = _getSigmaColor(sigma);
+    final resultTexts = _getResultStrings(sigma);
 
     return Scaffold(
       body: SafeArea(
@@ -128,7 +160,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 1. Header (Context)
+              // Header
               Text(
                 _isComplete ? AppStrings.get('sim_complete') : AppStrings.get('sim_running'), 
                 style: TextStyle(fontFamily: 'Monospace', color: Colors.grey[600], letterSpacing: 2)
@@ -146,56 +178,55 @@ class _SimulationScreenState extends State<SimulationScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
 
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
 
-              // 2. The Entropy Grid (10x10)
+              // Grid
               Expanded(
+                flex: 3, 
                 child: Center(
                   child: LoreWrapper(
                     titleKey: 'lore_grid_title',
                     descKey: 'lore_grid_desc',
-                    child: AspectRatio(
-                      aspectRatio: 1.0,
-                      child: GridView.builder(
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 10,
-                          mainAxisSpacing: 4,
-                          crossAxisSpacing: 4,
-                        ),
-                        itemCount: _targetSamples,
-                        itemBuilder: (context, index) {
-                          // Если бит еще не сгенерирован - показываем пустую ячейку
-                          if (index >= _results.length) {
-                            return Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.05),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            );
-                          }
-                          
-                          // Если бит есть - красим
-                          bool isHead = _results[index];
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            decoration: BoxDecoration(
-                              color: isHead ? AppColors.primary : const Color(0xFF2A2A35),
-                              borderRadius: BorderRadius.circular(2),
-                              boxShadow: isHead 
-                                ? [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 4)]
-                                : [],
+                    child: LayoutBuilder( 
+                      builder: (context, constraints) {
+                        int crossAxisCount = sqrt(_targetSamples).ceil();
+                        return AspectRatio(
+                          aspectRatio: 1.0, 
+                          child: GridView.builder(
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              mainAxisSpacing: 2, 
+                              crossAxisSpacing: 2,
                             ),
-                          );
-                        },
-                      ),
+                            itemCount: _targetSamples, 
+                            itemBuilder: (context, index) {
+                              if (index >= _results.length) {
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.02),
+                                    borderRadius: BorderRadius.circular(1),
+                                  ),
+                                );
+                              }
+                              bool isHead = _results[index];
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: isHead ? AppColors.primary : const Color(0xFF2A2A35),
+                                  borderRadius: BorderRadius.circular(1),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ), 
                   ),
                 ),
               ),
 
-              // 3. Stats & Result
-              LoreWrapper( // <--- ОБЕРТКА
+              // Sigma
+              LoreWrapper( 
                 titleKey: 'lore_sigma_title',
                 descKey: 'lore_sigma_desc',
                 child: Column(
@@ -209,17 +240,17 @@ class _SimulationScreenState extends State<SimulationScreen> {
                         shadows: [Shadow(color: statusColor.withOpacity(0.5), blurRadius: 20)]
                       ),
                     ),
-                    const Text("CURRENT DEVIATION", style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 2)),
+                    Text(AppStrings.get('sim_sigma_label'), style: const TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 2)),
                   ],
                 ),
               ),
               
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
               
+              // Chart
               Expanded(
-                flex: 2, // Даем ему побольше места
+                flex: 2, 
                 child: Container(
-                  // Небольшой фон и рамка для эстетики терминала
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.3),
                     border: Border(
@@ -229,7 +260,6 @@ class _SimulationScreenState extends State<SimulationScreen> {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   width: double.infinity,
-                  // Сам график
                   child: SigmaChart(
                     dataPoints: _sigmaHistory,
                     totalPoints: _targetSamples,
@@ -239,32 +269,66 @@ class _SimulationScreenState extends State<SimulationScreen> {
 
               const SizedBox(height: 20),
 
-              // 4. Action Button (появляется только в конце)
-              SizedBox(
-                height: 50,
-                child: _isComplete 
-                ? ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.surface,
-                      side: BorderSide(color: statusColor),
-                    ),
-                    onPressed: _saveAndExit,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min, // Чтобы кнопка не растягивалась слишком сильно
-                      children: [
-                        Text(AppStrings.get('btn_commit'), style: const TextStyle(letterSpacing: 2)),
-                        const SizedBox(width: 12),
-                        LoreWrapper(
-                          titleKey: 'lore_btn_commit_title',
-                          descKey: 'lore_btn_commit_desc',
-                          child: const Icon(Icons.info_outline, size: 20, color: AppColors.accent),
-                        ),
-                      ],
-                    ),
-                  )
-                : const Center(
-                    child: CircularProgressIndicator(color: AppColors.primary),
+              // RESULT PANEL (Вместо кнопки)
+              AnimatedCrossFade(
+                duration: const Duration(milliseconds: 500),
+                crossFadeState: _isComplete ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                
+                // 1. Состояние загрузки (пустое место или индикатор)
+                firstChild: const SizedBox(
+                  height: 100,
+                  child: Center(
+                     child: Text("CALCULATING...", style: TextStyle(letterSpacing: 3, fontSize: 10, color: Colors.white24)),
                   ),
+                ),
+                
+                // 2. Состояние результата (Вердикт + Кнопка выхода)
+                secondChild: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    border: Border.all(color: statusColor.withOpacity(0.5)),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [BoxShadow(color: statusColor.withOpacity(0.1), blurRadius: 10)]
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        resultTexts['title']!,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                          fontFamily: 'Monospace'
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        resultTexts['desc']!,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: statusColor.withOpacity(0.2),
+                            foregroundColor: statusColor,
+                          ),
+                          onPressed: _exit,
+                          child: Text(AppStrings.get('btn_acknowledge')),
+                        ),
+                      )
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
