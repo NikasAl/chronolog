@@ -16,7 +16,7 @@ class EventDetailsScreen extends StatefulWidget {
 
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   final IsarService _service = IsarService();
-  late bool? _isFulfilled; // Локальное состояние выбора
+  late bool? _isFulfilled;
 
   @override
   void initState() {
@@ -29,7 +29,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       _isFulfilled = status;
     });
     await _service.updateFeedback(widget.event.id, status);
-    // Можно добавить снекбар или вибрацию
   }
 
   void _deleteEvent() async {
@@ -46,11 +45,12 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final color = _getSigmaColor(widget.event.sigma);
+    // Форматирование даты
     final dateStr = "${widget.event.timestamp.day}/${widget.event.timestamp.month} ${widget.event.timestamp.hour}:${widget.event.timestamp.minute.toString().padLeft(2, '0')}";
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("LOG_ENTRY // DETAILS", style: TextStyle(letterSpacing: 2, fontSize: 14)),
+        title: Text(AppStrings.get('details_title'), style: const TextStyle(letterSpacing: 2, fontSize: 14)),
         backgroundColor: Colors.transparent,
         actions: [
           IconButton(
@@ -76,30 +76,63 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              "$dateStr  |  TYPE: ${widget.event.type.name.toUpperCase()}",
+              "$dateStr  |  ${AppStrings.get('details_type')}: ${AppStrings.get('type_${widget.event.type.name}')}",
               style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
             
             const Divider(color: Colors.white10, height: 40),
 
-            // 2. Статистика (Плашки)
+            // 2. Статистика (с ЛОРОМ)
             Row(
               children: [
-                _buildStatCard("SIGMA", "${widget.event.sigma.toStringAsFixed(2)}σ", color),
+                // Сигма
+                _buildStatCard(
+                  labelKey: 'stat_sigma',
+                  value: "${widget.event.sigma.toStringAsFixed(2)}σ",
+                  valueColor: color,
+                  loreTitleKey: 'lore_stat_sigma_title',
+                  loreDescKey: 'lore_stat_sigma_desc',
+                ),
                 const SizedBox(width: 12),
-                _buildStatCard("SAMPLES", "${widget.event.totalSamples}", AppColors.primary),
+                // Выборка
+                _buildStatCard(
+                  labelKey: 'stat_samples',
+                  value: "${widget.event.totalSamples}",
+                  valueColor: AppColors.primary,
+                  loreTitleKey: 'lore_stat_samples_title',
+                  loreDescKey: 'lore_stat_samples_desc',
+                ),
                 const SizedBox(width: 12),
-                _buildStatCard("HITS", "${widget.event.positiveHits}", AppColors.primary),
+                // Попадания (Hits) - оставляем без лора или дублируем
+                _buildStatCard(
+                  labelKey: 'stat_hits',
+                  value: "${widget.event.positiveHits}",
+                  valueColor: AppColors.primary,
+                  loreTitleKey: 'lore_grid_title', // Ссылка на общее описание сетки
+                  loreDescKey: 'lore_grid_desc',
+                ),
               ],
             ),
 
             const SizedBox(height: 40),
 
             // 3. Блок "Проверка Реальности"
-            const Text(
-              "REALITY_CHECK_PROTOCOL:",
-              style: TextStyle(color: AppColors.accent, letterSpacing: 2, fontSize: 12),
+            // Добавляем (i) с твоей теорией интерпретации
+            LoreWrapper(
+              titleKey: 'lore_interpretation_title',
+              descKey: 'lore_interpretation_desc',
+              child: Row(
+                children: [
+                  Text(
+                    AppStrings.get('protocol_title'),
+                    style: const TextStyle(color: AppColors.accent, letterSpacing: 2, fontSize: 12),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.help_outline, size: 16, color: AppColors.accent),
+                ],
+              ),
             ),
+            
             const SizedBox(height: 20),
             
             Container(
@@ -111,17 +144,17 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               ),
               child: Column(
                 children: [
-                  const Text(
-                    "Сбылось ли событие или подтвердилось ли решение?",
+                  Text(
+                    AppStrings.get('protocol_question'),
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70),
+                    style: const TextStyle(color: Colors.white70),
                   ),
                   const SizedBox(height: 20),
                   Row(
                     children: [
                       Expanded(
                         child: _buildFeedbackButton(
-                          label: "НЕТ / DIVERGENCE",
+                          label: AppStrings.get('btn_divergence'),
                           value: false,
                           activeColor: AppColors.error,
                           icon: Icons.close,
@@ -130,9 +163,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _buildFeedbackButton(
-                          label: "ДА / CONVERGENCE",
+                          label: AppStrings.get('btn_convergence'),
                           value: true,
-                          activeColor: Colors.greenAccent, // Можно вынести в theme
+                          activeColor: Colors.greenAccent,
                           icon: Icons.check,
                         ),
                       ),
@@ -144,13 +177,13 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
             const SizedBox(height: 20),
             
-            // Пояснение
+            // Статус
             if (_isFulfilled != null)
               Center(
                 child: Text(
                   _isFulfilled! 
-                      ? ">> СОБЫТИЕ ЗАФИКСИРОВАНО В ИСТОРИИ <<" 
-                      : ">> ОТКЛОНЕНИЕ ОТ ВЕРОЯТНОСТИ ЗАФИКСИРОВАНО <<",
+                      ? AppStrings.get('status_fixed')
+                      : AppStrings.get('status_diverged'),
                   style: TextStyle(
                     color: _isFulfilled! ? Colors.greenAccent : AppColors.error,
                     fontFamily: 'Monospace',
@@ -164,21 +197,32 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     );
   }
 
-  Widget _buildStatCard(String label, String value, Color valueColor) {
+  // Обновленный виджет карточки со встроенным LoreWrapper
+  Widget _buildStatCard({
+    required String labelKey, 
+    required String value, 
+    required Color valueColor,
+    required String loreTitleKey,
+    required String loreDescKey,
+  }) {
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: Column(
-          children: [
-            Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: valueColor)),
-            const SizedBox(height: 4),
-            Text(label, style: const TextStyle(fontSize: 10, color: Colors.white38)),
-          ],
+      child: LoreWrapper( // Оборачиваем всю карточку
+        titleKey: loreTitleKey,
+        descKey: loreDescKey,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Column(
+            children: [
+              Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: valueColor)),
+              const SizedBox(height: 4),
+              Text(AppStrings.get(labelKey), style: const TextStyle(fontSize: 10, color: Colors.white38)),
+            ],
+          ),
         ),
       ),
     );
@@ -211,6 +255,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             const SizedBox(height: 8),
             Text(
               label,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
