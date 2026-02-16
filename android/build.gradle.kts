@@ -1,3 +1,5 @@
+import com.android.build.gradle.LibraryExtension
+
 allprojects {
     repositories {
         google()
@@ -17,6 +19,19 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(":app")
+}
+
+// Fix for plugins without namespace (isar_flutter_libs, etc.)
+subprojects {
+    afterEvaluate {
+        if (project.hasProperty("android")) {
+            project.extensions.configure<LibraryExtension>("android") {
+                if (namespace == null) {
+                    namespace = "com.example.chronolog.${project.name}"
+                }
+            }
+        }
+    }
 }
 
 tasks.register<Delete>("clean") {
