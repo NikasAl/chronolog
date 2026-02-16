@@ -17,17 +17,18 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
-subprojects {
-    project.evaluationDependsOn(":app")
-}
 
 // Fix for plugins without namespace (isar_flutter_libs, etc.)
+// Must be configured BEFORE project evaluation
 subprojects {
-    afterEvaluate {
-        if (project.hasProperty("android")) {
-            project.extensions.configure<LibraryExtension>("android") {
-                if (namespace == null) {
-                    namespace = "com.example.chronolog.${project.name}"
+    // Skip the app module
+    if (project.name != "app") {
+        project.plugins.whenPluginAdded { plugin ->
+            if (plugin is com.android.build.gradle.LibraryPlugin) {
+                project.extensions.configure<LibraryExtension>("android") {
+                    if (namespace == null) {
+                        namespace = "com.example.chronolog.${project.name}"
+                    }
                 }
             }
         }
